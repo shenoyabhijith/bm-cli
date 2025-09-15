@@ -18,7 +18,7 @@ func NewClient() *redis.Client {
 
 	addr := os.Getenv("REDIS_ADDR")
 	if addr == "" {
-		addr = "192.168.1.100:6379"
+		addr = "localhost:6379"
 	}
 
 	dbStr := os.Getenv("REDIS_DB")
