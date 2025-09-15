@@ -27,15 +27,25 @@ go mod tidy
 
 ### Configuration
 
+Copy the example env file and edit as needed:
+
+```bash
+cp .env.example .env
+```
+
 Environment variables (optional; sensible defaults):
 
 ```env
 REDIS_ADDR=localhost:6379
 REDIS_DB=0
 REDIS_PASSWORD=
+# Optional
+# LLM_API_KEY=
+# LLM_MODEL=gpt-4o-mini
+# DEBUG=false
 ```
 
-Note: LLM configs referenced in earlier drafts are not required by the current CLI.
+Note: `.env` is ignored by Git. Do not commit secrets. LLM configs are optional and not required by the current CLI.
 
 ### Usage
 
