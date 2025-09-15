@@ -58,7 +58,6 @@ func (bi *BrowserImporter) ImportFromChrome() error {
 	return bi.importFromFile(chromePath, "Chrome")
 }
 
-
 // ImportFromFirefox imports bookmarks from Firefox browser
 func (bi *BrowserImporter) ImportFromFirefox() error {
 	firefoxPath := bi.getFirefoxBookmarkPath()
@@ -81,12 +80,58 @@ func (bi *BrowserImporter) ImportFromSafari() error {
 
 // ImportFromZen imports bookmarks from Zen browser
 func (bi *BrowserImporter) ImportFromZen() error {
+	// Try to find exported HTML bookmarks first
+	htmlPath := bi.getZenHTMLBookmarkPath()
+	if htmlPath != "" {
+		return bi.ImportFromHTMLFile(htmlPath)
+	}
+
+	// Fallback to direct database access (may be locked)
 	zenPath := bi.getZenBookmarkPath()
 	if zenPath == "" {
-		return fmt.Errorf("Zen bookmark file not found")
+		return fmt.Errorf("Zen bookmark file not found. Please export bookmarks from Zen browser (Bookmarks > Import and Backup > Export Bookmarks to HTML) and save as 'bookmarks.html' in your Downloads folder")
 	}
 
 	return bi.importFromZenFile(zenPath)
+}
+
+// getZenHTMLBookmarkPath looks for exported HTML bookmark files
+func (bi *BrowserImporter) getZenHTMLBookmarkPath() string {
+	possiblePaths := []string{
+		filepath.Join(os.Getenv("HOME"), "Downloads", "bookmarks.html"),
+		filepath.Join(os.Getenv("HOME"), "Desktop", "bookmarks.html"),
+		filepath.Join(os.Getenv("HOME"), "Documents", "bookmarks.html"),
+	}
+
+	for _, path := range possiblePaths {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	return ""
+}
+
+// importFromZenFile imports bookmarks from Zen SQLite database (fallback)
+func (bi *BrowserImporter) importFromZenFile(filePath string) error {
+	db, err := sql.Open("sqlite3", filePath+"?mode=ro&_timeout=1000")
+	if err != nil {
+		return fmt.Errorf("failed to open Zen database: %v", err)
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := db.PingContext(ctx); err != nil {
+		return fmt.Errorf("Zen database is locked (browser may be running). Please close Zen browser and try again: %v", err)
+	}
+
+	bookmarks := bi.parseZenBookmarks(db)
+	if len(bookmarks) == 0 {
+		return fmt.Errorf("no bookmarks found in Zen")
+	}
+
+	return bi.importBookmarks(bookmarks, "Zen")
 }
 
 // ImportFromArc imports bookmarks from Arc browser
@@ -285,13 +330,16 @@ func (bi *BrowserImporter) extractFirefoxBookmarks(node gjson.Result, folder str
 func (bi *BrowserImporter) importFromSafariFile(filePath string) error {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		return err
+		if os.IsPermission(err) {
+			return fmt.Errorf("Safari bookmark access denied. Please grant Full Disk Access permission to Terminal in System Preferences > Security & Privacy > Privacy > Full Disk Access")
+		}
+		return fmt.Errorf("failed to read Safari bookmarks: %v", err)
 	}
 
 	var plistData interface{}
 	_, err = plist.Unmarshal(data, &plistData)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to parse Safari plist: %v", err)
 	}
 
 	bookmarks := bi.parseSafariBookmarks(plistData)
@@ -302,20 +350,62 @@ func (bi *BrowserImporter) importFromSafariFile(filePath string) error {
 	return bi.importBookmarks(bookmarks, "Safari")
 }
 
-// importFromZenFile imports bookmarks from Zen SQLite database
-func (bi *BrowserImporter) importFromZenFile(filePath string) error {
-	db, err := sql.Open("sqlite3", filePath)
+// ImportFromHTMLFile imports bookmarks from HTML export file
+func (bi *BrowserImporter) ImportFromHTMLFile(htmlFilePath string) error {
+	data, err := os.ReadFile(htmlFilePath)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to read HTML file: %v", err)
 	}
-	defer db.Close()
 
-	bookmarks := bi.parseZenBookmarks(db)
+	bookmarks := bi.parseHTMLBookmarks(data)
 	if len(bookmarks) == 0 {
-		return fmt.Errorf("no bookmarks found in Zen")
+		return fmt.Errorf("no bookmarks found in HTML file")
 	}
 
-	return bi.importBookmarks(bookmarks, "Zen")
+	fmt.Printf("Found %d bookmarks in HTML file\n", len(bookmarks))
+	return bi.importBookmarks(bookmarks, "HTML Export")
+}
+
+// parseHTMLBookmarks parses HTML bookmark export format
+func (bi *BrowserImporter) parseHTMLBookmarks(data []byte) []BrowserBookmark {
+	var bookmarks []BrowserBookmark
+
+	// Simple HTML parsing for bookmark files
+	content := string(data)
+	lines := strings.Split(content, "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "<DT><A HREF=") {
+			// Extract URL and title from HTML bookmark format
+			urlStart := strings.Index(line, "HREF=\"") + 6
+			urlEnd := strings.Index(line[urlStart:], "\"")
+			if urlEnd == -1 {
+				continue
+			}
+			url := line[urlStart : urlStart+urlEnd]
+
+			titleStart := strings.Index(line, ">") + 1
+			titleEnd := strings.Index(line[titleStart:], "</A>")
+			if titleEnd == -1 {
+				continue
+			}
+			title := line[titleStart : titleStart+titleEnd]
+
+			bm := BrowserBookmark{
+				URL:         url,
+				Title:       title,
+				Description: "",
+				Tags:        []string{"Imported"},
+				CreatedAt:   time.Now().Unix(),
+				Folder:      "Imported",
+			}
+
+			bookmarks = append(bookmarks, bm)
+		}
+	}
+
+	return bookmarks
 }
 
 // parseSafariBookmarks parses Safari bookmark plist
@@ -379,6 +469,25 @@ func (bi *BrowserImporter) extractSafariBookmarks(node interface{}, folder strin
 func (bi *BrowserImporter) parseZenBookmarks(db *sql.DB) []BrowserBookmark {
 	var bookmarks []BrowserBookmark
 
+	// First, let's check if the tables exist
+	tablesQuery := "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%bookmark%'"
+	rows, err := db.Query(tablesQuery)
+	if err != nil {
+		fmt.Printf("Error checking tables: %v\n", err)
+		return bookmarks
+	}
+	defer rows.Close()
+
+	var tables []string
+	for rows.Next() {
+		var tableName string
+		if err := rows.Scan(&tableName); err == nil {
+			tables = append(tables, tableName)
+		}
+	}
+	fmt.Printf("Found bookmark tables: %v\n", tables)
+
+	// Try the standard Firefox query
 	query := `
 		SELECT b.title, p.url, b.dateAdded, f.title as folder
 		FROM moz_bookmarks b
@@ -387,18 +496,21 @@ func (bi *BrowserImporter) parseZenBookmarks(db *sql.DB) []BrowserBookmark {
 		WHERE b.type = 1 AND p.url IS NOT NULL
 	`
 
-	rows, err := db.Query(query)
+	rows, err = db.Query(query)
 	if err != nil {
+		fmt.Printf("Error executing query: %v\n", err)
 		return bookmarks
 	}
 	defer rows.Close()
 
+	count := 0
 	for rows.Next() {
 		var title, url, folder string
 		var dateAdded int64
 
 		err := rows.Scan(&title, &url, &dateAdded, &folder)
 		if err != nil {
+			fmt.Printf("Error scanning row: %v\n", err)
 			continue
 		}
 
@@ -412,8 +524,10 @@ func (bi *BrowserImporter) parseZenBookmarks(db *sql.DB) []BrowserBookmark {
 		}
 
 		bookmarks = append(bookmarks, bm)
+		count++
 	}
 
+	fmt.Printf("Found %d bookmarks in Zen database\n", count)
 	return bookmarks
 }
 
@@ -554,8 +668,7 @@ func (bi *BrowserImporter) getSafariBookmarkPath() string {
 func (bi *BrowserImporter) getZenBookmarkPath() string {
 	switch runtime.GOOS {
 	case "darwin":
-		// Zen stores bookmarks in places.sqlite in the profile directory
-		// Check for actual Zen profile directories
+		// Zen stores bookmarks in places.sqlite in the profiles directory
 		zenProfilesDir := filepath.Join(os.Getenv("HOME"), "Library", "Application Support", "zen", "Profiles")
 		if profiles, err := os.ReadDir(zenProfilesDir); err == nil {
 			for _, profile := range profiles {
@@ -569,19 +682,33 @@ func (bi *BrowserImporter) getZenBookmarkPath() string {
 		}
 		return ""
 	case "linux":
-		// Check common Linux locations
-		possiblePaths := []string{
-			filepath.Join(os.Getenv("HOME"), ".zen", "default", "places.sqlite"),
-			filepath.Join(os.Getenv("HOME"), ".zen", "default-release", "places.sqlite"),
-		}
-		for _, path := range possiblePaths {
-			if _, err := os.Stat(path); err == nil {
-				return path
+		// Linux: ~/.zen/profiles/
+		zenProfilesDir := filepath.Join(os.Getenv("HOME"), ".zen", "profiles")
+		if profiles, err := os.ReadDir(zenProfilesDir); err == nil {
+			for _, profile := range profiles {
+				if profile.IsDir() {
+					placesPath := filepath.Join(zenProfilesDir, profile.Name(), "places.sqlite")
+					if _, err := os.Stat(placesPath); err == nil {
+						return placesPath
+					}
+				}
 			}
 		}
 		return ""
 	case "windows":
-		return filepath.Join(os.Getenv("APPDATA"), "Zen", "Profiles", "default", "places.sqlite")
+		// Windows: %APPDATA%\zen\profiles\
+		zenProfilesDir := filepath.Join(os.Getenv("APPDATA"), "zen", "profiles")
+		if profiles, err := os.ReadDir(zenProfilesDir); err == nil {
+			for _, profile := range profiles {
+				if profile.IsDir() {
+					placesPath := filepath.Join(zenProfilesDir, profile.Name(), "places.sqlite")
+					if _, err := os.Stat(placesPath); err == nil {
+						return placesPath
+					}
+				}
+			}
+		}
+		return ""
 	default:
 		return ""
 	}
@@ -591,11 +718,36 @@ func (bi *BrowserImporter) getZenBookmarkPath() string {
 func (bi *BrowserImporter) getArcBookmarkPath() string {
 	switch runtime.GOOS {
 	case "darwin":
-		return filepath.Join(os.Getenv("HOME"), "Library", "Application Support", "Arc", "User Data", "Default", "Bookmarks")
+		// Arc stores bookmarks in Bookmarks JSON file inside each profile
+		// macOS: ~/Library/Application Support/Arc/User Data/
+		arcUserDataDir := filepath.Join(os.Getenv("HOME"), "Library", "Application Support", "Arc", "User Data")
+
+		// Check Default profile first
+		defaultPath := filepath.Join(arcUserDataDir, "Default", "Bookmarks")
+		if _, err := os.Stat(defaultPath); err == nil {
+			return defaultPath
+		}
+
+		// Check other profiles (Profile 1, Profile 2, etc.)
+		if profiles, err := os.ReadDir(arcUserDataDir); err == nil {
+			for _, profile := range profiles {
+				if profile.IsDir() && strings.HasPrefix(profile.Name(), "Profile") {
+					profilePath := filepath.Join(arcUserDataDir, profile.Name(), "Bookmarks")
+					if _, err := os.Stat(profilePath); err == nil {
+						return profilePath
+					}
+				}
+			}
+		}
+		return ""
 	case "linux":
-		return filepath.Join(os.Getenv("HOME"), ".config", "Arc", "User Data", "Default", "Bookmarks")
+		// Linux: ~/.config/Arc/User Data/
+		arcUserDataDir := filepath.Join(os.Getenv("HOME"), ".config", "Arc", "User Data")
+		return filepath.Join(arcUserDataDir, "Default", "Bookmarks")
 	case "windows":
-		return filepath.Join(os.Getenv("LOCALAPPDATA"), "Arc", "User Data", "Default", "Bookmarks")
+		// Windows: %LOCALAPPDATA%\Arc\User Data\
+		arcUserDataDir := filepath.Join(os.Getenv("LOCALAPPDATA"), "Arc", "User Data")
+		return filepath.Join(arcUserDataDir, "Default", "Bookmarks")
 	default:
 		return ""
 	}

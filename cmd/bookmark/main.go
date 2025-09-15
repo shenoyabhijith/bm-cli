@@ -57,6 +57,18 @@ Examples:
 				Action:    importer.ImportCommand(redisClient),
 			},
 			{
+				Name:      "import-html",
+				Usage:     "Import bookmarks from HTML export file",
+				ArgsUsage: "<file>",
+				Action: func(c *cli.Context) error {
+					if c.NArg() < 1 {
+						return cli.Exit("Missing HTML file argument", 1)
+					}
+					importer := browser.NewBrowserImporter(redisClient)
+					return importer.ImportFromHTMLFile(c.Args().Get(0))
+				},
+			},
+			{
 				Name:  "browser",
 				Usage: "Import bookmarks from browser",
 				Subcommands: []*cli.Command{
