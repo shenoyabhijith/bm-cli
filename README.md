@@ -76,6 +76,26 @@ Search shortcuts inside interactive mode:
 - `#tag` filter by tag(s)
 - `@YYYY-MM-DD` date filters (from/to)
 
+### Global install (macOS)
+
+Install a global symlink so updates reflect immediately:
+
+```bash
+# from project root
+scripts/install-global.sh
+
+# test
+bm --help
+```
+
+Update globally after pulling new changes:
+
+```bash
+scripts/update-global.sh
+```
+
+Note: We install as `bm` to avoid conflict with the system `bc` calculator.
+
 ### Development
 
 Run directly with arguments:
