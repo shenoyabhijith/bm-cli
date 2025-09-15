@@ -27,7 +27,7 @@ Commands:
 │ Command │ Description                                                │
 ├─────────┼─────────────────────────────────────────────────────────────┤
 │ import  │ Import bookmarks from JSON file                            │
-│ browser │ Auto-import bookmarks from browsers (Chrome, Firefox, Safari)│
+│ browser │ Auto-import bookmarks from browsers (Chrome, Firefox, Safari, Zen, Arc)│
 │ sync    │ Sync and deduplicate bookmarks from all browsers          │
 │ search  │ Interactive search with filters and shortcuts             │
 │ clean   │ Remove duplicate bookmarks                                 │
@@ -85,19 +85,27 @@ Examples:
 						},
 					},
 					{
+						Name:  "zen",
+						Usage: "Import from Zen browser",
+						Action: func(c *cli.Context) error {
+							importer := browser.NewBrowserImporter(redisClient)
+							return importer.ImportFromZen()
+						},
+					},
+					{
+						Name:  "arc",
+						Usage: "Import from Arc browser",
+						Action: func(c *cli.Context) error {
+							importer := browser.NewBrowserImporter(redisClient)
+							return importer.ImportFromArc()
+						},
+					},
+					{
 						Name:  "all",
 						Usage: "Import from all available browsers",
 						Action: func(c *cli.Context) error {
 							importer := browser.NewBrowserImporter(redisClient)
 							return importer.AutoImport()
-						},
-					},
-					{
-						Name:  "test",
-						Usage: "Test import with sample Chrome bookmarks",
-						Action: func(c *cli.Context) error {
-							importer := browser.NewBrowserImporter(redisClient)
-							return importer.ImportFromChromeTest()
 						},
 					},
 				},
@@ -130,7 +138,7 @@ Commands:
 │ Command │ Description                                                │
 ├─────────┼─────────────────────────────────────────────────────────────┤
 │ import  │ Import bookmarks from JSON file                            │
-│ browser │ Auto-import bookmarks from browsers (Chrome, Firefox, Safari)│
+│ browser │ Auto-import bookmarks from browsers (Chrome, Firefox, Safari, Zen, Arc)│
 │ sync    │ Sync and deduplicate bookmarks from all browsers          │
 │ search  │ Interactive search with filters and shortcuts             │
 │ clean   │ Remove duplicate bookmarks                                 │
