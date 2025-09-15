@@ -42,6 +42,3 @@ func NewClient() *redis.Client {
 
 	return client
 }
-
-
-
