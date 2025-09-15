@@ -54,8 +54,8 @@ func main() {
 	}
 
 	app := &cli.App{
-		Name:  "bm",
-		Usage: "Simple bookmark manager - check duplicates and dead links",
+		Name:    "bm",
+		Usage:   "Simple bookmark manager - check duplicates and dead links",
 		Version: version,
 		Description: `Power-packed 6-command CLI.
 
