@@ -1,129 +1,103 @@
-# Go Bookmarks CLI
+## Go Bookmarks CLI
 
-Ultra-fast bookmark manager with LLM capabilities built in Go.
+Ultra-fast bookmark manager written in Go with Redis backend and interactive search.
 
-## Features
+### Features
 
-- **Fast Import**: Import bookmarks from JSON files with progress tracking
-- **Interactive Search**: Search through bookmarks with various filters
-- **Redis Backend**: Uses Redis for ultra-fast storage and retrieval
-- **Duplicate Detection**: Automatically prevents duplicate bookmarks
-- **Tag Support**: Organize bookmarks with tags
-- **Date Filtering**: Filter bookmarks by creation date
+- **Fast JSON Import**: Import bookmarks from JSON with progress bar
+- **Browser Imports**: Import from Chrome, Firefox, Safari, Zen, Arc, or all
+- **Sync & Dedupe**: Auto-import from browsers, remove duplicates, rebuild index
+- **Interactive Search**: Text, tag, and date filters; quick shortcuts
+- **Redis Backend**: Sorted-set index for fast retrieval
+- **Duplicate Prevention**: URL set prevents re-ingest
 
-## Prerequisites
+### Prerequisites
 
-- Go 1.19 or later
-- Redis server (configured to use production Redis at `192.168.1.100:6379`)
+- Go 1.21+ (tested on darwin/arm64)
+- Redis server running locally (`localhost:6379` by default)
 
-## Installation
+### Install
 
-1. Clone the repository:
 ```bash
 git clone <repository-url>
 cd Go-Bookmarks-cli
-```
-
-2. Install dependencies:
-```bash
 go mod tidy
-```
-
-3. Build the application:
-```bash
 ./scripts/build.sh
 ```
 
-## Configuration
+### Configuration
 
-The application uses environment variables for configuration. Update the `.env` file:
+Environment variables (optional; sensible defaults):
 
 ```env
-REDIS_ADDR=192.168.1.100:6379
-REDIS_DB=1
+REDIS_ADDR=localhost:6379
+REDIS_DB=0
 REDIS_PASSWORD=
-LLM_API_KEY=your_openai_key_here
-LLM_MODEL=gpt-4
-DEBUG=true
 ```
 
-## Usage
+Note: LLM configs referenced in earlier drafts are not required by the current CLI.
 
-### Import Bookmarks
+### Usage
 
-Import bookmarks from a JSON file:
+After build, run the CLI binary:
 
 ```bash
-./bin/bookmark import test-bookmarks.json
+./bin/bookmark --help
 ```
 
-### Search Bookmarks
+Commands:
 
-Start interactive search mode:
+- **import**: Import bookmarks from JSON file
+  - `./bin/bookmark import <file>`
+- **import-html**: Import from exported bookmarks HTML
+  - `./bin/bookmark import-html <file>`
+- **browser**: Import from a specific browser
+  - `./bin/bookmark browser chrome|firefox|safari|zen|arc|all`
+- **sync**: Import from all available browsers and deduplicate
+  - `./bin/bookmark sync`
+- **search**: Interactive search mode
+  - `./bin/bookmark search`
+- **clean**: Remove duplicate bookmarks
+  - `./bin/bookmark clean`
+
+Search shortcuts inside interactive mode:
+
+- `/query` text search in title/description/url
+- `#tag` filter by tag(s)
+- `@YYYY-MM-DD` date filters (from/to)
+
+### Development
+
+Run directly with arguments:
 
 ```bash
-./bin/bookmark search
+./scripts/run-dev.sh search
 ```
 
-Search shortcuts:
-- `/query` - Text search
-- `#tag` - Filter by tags
-- `@date` - Filter by date range
-- `!llm` - Enable LLM processing
-
-Examples:
-```bash
-> /golang programming
-> #database #redis
-> @2023-01-01 @2023-12-31
-```
-
-### Clean Duplicates
-
-Remove duplicate bookmarks:
-
-```bash
-./bin/bookmark clean
-```
-
-## Development
-
-Run in development mode:
-
-```bash
-./scripts/run-dev.sh
-```
-
-## Project Structure
+### Project Structure
 
 ```
 bookmark-cli/
-├── cmd/bookmark/main.go          # Main CLI application
+├── cmd/bookmark/main.go
 ├── internal/
-│   ├── models/bookmark.go        # Bookmark data model
-│   ├── redis/client.go           # Redis client configuration
-│   ├── importer/importer.go      # Bookmark import functionality
-│   └── searcher/searcher.go      # Search functionality
-├── configs/config.yaml           # Configuration file
+│   ├── browser/browser.go
+│   ├── importer/importer.go
+│   ├── models/bookmark.go
+│   ├── redis/client.go
+│   └── searcher/searcher.go
 ├── scripts/
-│   ├── build.sh                  # Build script
-│   └── run-dev.sh                # Development run script
-└── test-bookmarks.json           # Sample bookmark data
+│   ├── build.sh
+│   └── run-dev.sh
+├── configs/config.yaml
+└── bin/bookmark (built)
 ```
 
-## Testing
+### Notes
 
-Test the application with sample data:
+- The repository intentionally excludes committed binaries; builds output to `bin/`.
+- Ensure Redis is reachable; default fallback is `localhost:6379`.
 
-```bash
-# Import test bookmarks
-./bin/bookmark import test-bookmarks.json
-
-# Search for specific bookmarks
-echo "golang" | ./bin/bookmark search
-```
-
-## License
+### License
 
 MIT License
 
