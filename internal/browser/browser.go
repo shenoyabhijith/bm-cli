@@ -80,13 +80,16 @@ func (bi *BrowserImporter) ImportFromSafari() error {
 
 // ImportFromZen imports bookmarks from Zen browser
 func (bi *BrowserImporter) ImportFromZen() error {
-	// Try to find exported HTML bookmarks first
+	// Try to find exported HTML bookmarks first (skip if permission denied)
 	htmlPath := bi.getZenHTMLBookmarkPath()
 	if htmlPath != "" {
-		return bi.ImportFromHTMLFile(htmlPath)
+		if err := bi.ImportFromHTMLFile(htmlPath); err == nil {
+			return nil
+		}
+		// If HTML import fails, continue to database import
 	}
 
-	// Fallback to direct database access (may be locked)
+	// Fallback to direct database access
 	zenPath := bi.getZenBookmarkPath()
 	if zenPath == "" {
 		return fmt.Errorf("Zen bookmark file not found. Please export bookmarks from Zen browser (Bookmarks > Import and Backup > Export Bookmarks to HTML) and save as 'bookmarks.html' in your Downloads folder")
@@ -113,17 +116,22 @@ func (bi *BrowserImporter) getZenHTMLBookmarkPath() string {
 
 // importFromZenFile imports bookmarks from Zen SQLite database (fallback)
 func (bi *BrowserImporter) importFromZenFile(filePath string) error {
-	db, err := sql.Open("sqlite3", filePath+"?mode=ro&_timeout=1000")
+	// Use WAL mode and read-only access to allow concurrent reads
+	db, err := sql.Open("sqlite3", filePath+"?mode=ro&_journal_mode=WAL&_timeout=5000")
 	if err != nil {
 		return fmt.Errorf("failed to open Zen database: %v", err)
 	}
 	defer db.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	// Test connection with longer timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := db.PingContext(ctx); err != nil {
-		return fmt.Errorf("Zen database is locked (browser may be running). Please close Zen browser and try again: %v", err)
+		if strings.Contains(err.Error(), "database is locked") {
+			return fmt.Errorf("Zen database is locked. Please close Zen browser and try again, or export bookmarks to HTML")
+		}
+		return fmt.Errorf("failed to connect to Zen database: %v", err)
 	}
 
 	bookmarks := bi.parseZenBookmarks(db)
