@@ -1,0 +1,77 @@
+{
+  "bookmarks": [
+    {
+      "url": "https://golang.org",
+      "title": "Go Programming Language",
+      "description": "Official Go website with documentation, tutorials, and downloads",
+      "tags": ["programming", "golang", "language"],
+      "created_at": 1634567890
+    },
+    {
+      "url": "https://redis.io",
+      "title": "Redis",
+      "description": "In-memory data structure store used as a database, cache, and message broker",
+      "tags": ["database", "cache", "redis"],
+      "created_at": 1634567891
+    },
+    {
+      "url": "https://github.com",
+      "title": "GitHub",
+      "description": "Web-based version control and collaboration platform for software developers",
+      "tags": ["git", "version-control", "collaboration"],
+      "created_at": 1634567892
+    },
+    {
+      "url": "https://docs.docker.com",
+      "title": "Docker Documentation",
+      "description": "Comprehensive documentation for Docker containerization platform",
+      "tags": ["docker", "containers", "devops"],
+      "created_at": 1634567893
+    },
+    {
+      "url": "https://kubernetes.io",
+      "title": "Kubernetes",
+      "description": "Production-grade container orchestration system",
+      "tags": ["kubernetes", "containers", "orchestration"],
+      "created_at": 1634567894
+    },
+    {
+      "url": "https://www.postgresql.org",
+      "title": "PostgreSQL",
+      "description": "Advanced open source relational database",
+      "tags": ["database", "postgresql", "sql"],
+      "created_at": 1634567895
+    },
+    {
+      "url": "https://nodejs.org",
+      "title": "Node.js",
+      "description": "JavaScript runtime built on Chrome's V8 JavaScript engine",
+      "tags": ["javascript", "nodejs", "runtime"],
+      "created_at": 1634567896
+    },
+    {
+      "url": "https://reactjs.org",
+      "title": "React",
+      "description": "A JavaScript library for building user interfaces",
+      "tags": ["react", "javascript", "frontend"],
+      "created_at": 1634567897
+    },
+    {
+      "url": "https://www.python.org",
+      "title": "Python",
+      "description": "Python programming language official website",
+      "tags": ["python", "programming", "language"],
+      "created_at": 1634567898
+    },
+    {
+      "url": "https://aws.amazon.com",
+      "title": "Amazon Web Services",
+      "description": "Cloud computing platform and services",
+      "tags": ["aws", "cloud", "infrastructure"],
+      "created_at": 1634567899
+    }
+  ]
+}
+
+
+

@@ -1,0 +1,545 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+
+Here's a comprehensive `.cursor/rules/mdc` file to set up your bookmark manager project with Cursor AI:
+
+```markdown
+# Bookmark Manager CLI Project Setup
+
+## Project Structure
+Create the following directory structure:
+```
+bookmark-cli/
+├── cmd/
+│   └── bookmark/
+│       └── main.go
+├── internal/
+│   ├── importer/
+│   │   └── importer.go
+│   ├── searcher/
+│   │   └── searcher.go
+│   ├── models/
+│   │   └── bookmark.go
+│   ├── redis/
+│   │   └── client.go
+│   └── llm/
+│       └── processor.go
+├── pkg/
+│   └── utils/
+│       └── helpers.go
+├── configs/
+│   └── config.yaml
+├── scripts/
+│   ├── build.sh
+│   └── run-dev.sh
+├── go.mod
+├── go.sum
+├── README.md
+└── .env
+```
+
+## Initial Setup Commands
+
+1. Initialize Go module:
+```bash
+go mod init github.com/yourusername/bookmark-cli
+```
+
+2. Install required dependencies:
+```bash
+go get github.com/go-redis/redis/v8
+go get github.com/tidwall/gjson
+go get github.com/schollz/progressbar/v3
+go get github.com/spf13/viper
+go get github.com/joho/godotenv
+go get github.com/urfave/cli/v2
+```
+
+## Environment Configuration
+
+Create `.env` file:
+```
+REDIS_ADDR=localhost:6379
+REDIS_DB=1
+REDIS_PASSWORD=
+LLM_API_KEY=your_openai_key_here
+LLM_MODEL=gpt-4
+DEBUG=true
+```
+
+Create `configs/config.yaml`:
+```yaml
+redis:
+  addr: "localhost:6379"
+  db: 1
+  password: ""
+  
+llm:
+  api_key: "your_openai_key_here"
+  model: "gpt-4"
+  timeout: 30s
+
+app:
+  debug: true
+  max_results: 100
+```
+
+## Core Implementation Files
+
+### cmd/bookmark/main.go
+```go
+package main
+
+import (
+	"log"
+	"os"
+
+	"github.com/urfave/cli/v2"
+	"github.com/yourusername/bookmark-cli/internal/importer"
+	"github.com/yourusername/bookmark-cli/internal/redis"
+	"github.com/yourusername/bookmark-cli/internal/searcher"
+)
+
+func main() {
+	// Initialize Redis connection
+	redisClient := redis.NewClient()
+	defer redisClient.Close()
+
+	app := &cli.App{
+		Name:  "bookmark-cli",
+		Usage: "Ultra-fast bookmark manager with LLM capabilities",
+		Commands: []*cli.Command{
+			{
+				Name:      "import",
+				Usage:     "Import bookmarks from JSON file",
+				ArgsUsage: "<file>",
+				Action:    importer.ImportCommand(redisClient),
+			},
+			{
+				Name:   "search",
+				Usage:  "Interactive search mode",
+				Action: searcher.SearchCommand(redisClient),
+			},
+			{
+				Name:   "clean",
+				Usage:  "Remove duplicate bookmarks",
+				Action: importer.CleanCommand(redisClient),
+			},
+		},
+	}
+
+	if err := app.Run(os.Args); err != nil {
+		log.Fatal(err)
+	}
+}
+```
+
+### internal/models/bookmark.go
+```go
+package models
+
+type Bookmark struct {
+	URL         string   `json:"url" redis:"url"`
+	Title       string   `json:"title" redis:"title"`
+	Description string   `json:"description" redis:"description"`
+	Tags        []string `json:"tags" redis:"tags"`
+	CreatedAt   int64    `json:"created_at" redis:"created_at"`
+	UpdatedAt   int64    `json:"updated_at" redis:"updated_at"`
+	ID          string   `json:"id" redis:"id"`
+}
+```
+
+### internal/redis/client.go
+```go
+package redis
+
+import (
+	"context"
+	"log"
+	"os"
+	"strconv"
+
+	"github.com/go-redis/redis/v8"
+	"github.com/joho/godotenv"
+)
+
+var ctx = context.Background()
+
+func NewClient() *redis.Client {
+	// Load environment variables
+	godotenv.Load()
+
+	addr := os.Getenv("REDIS_ADDR")
+	if addr == "" {
+		addr = "localhost:6379"
+	}
+
+	dbStr := os.Getenv("REDIS_DB")
+	db := 0
+	if dbStr != "" {
+		if d, err := strconv.Atoi(dbStr); err == nil {
+			db = d
+		}
+	}
+
+	client := redis.NewClient(&redis.Options{
+		Addr:     addr,
+		Password: os.Getenv("REDIS_PASSWORD"),
+		DB:       db,
+	})
+
+	// Test connection
+	if err := client.Ping(ctx).Err(); err != nil {
+		log.Fatal("Failed to connect to Redis:", err)
+	}
+
+	return client
+}
+```
+
+### internal/importer/importer.go
+```go
+package importer
+
+import (
+	"context"
+	"encoding/json"
+	"io/ioutil"
+	"log"
+	"time"
+
+	"github.com/go-redis/redis/v8"
+	"github.com/schollz/progressbar/v3"
+	"github.com/tidwall/gjson"
+	"github.com/urfave/cli/v2"
+	"github.com/yourusername/bookmark-cli/internal/models"
+)
+
+const (
+	RedisBookmarksKey = "bookmarks:index"
+	RedisURLSetKey    = "bookmarks:urls"
+	RedisTitleSetKey  = "bookmarks:titles"
+)
+
+func ImportCommand(redisClient *redis.Client) cli.ActionFunc {
+	return func(c *cli.Context) error {
+		if c.NArg() < 1 {
+			return cli.Exit("Missing file argument", 1)
+		}
+
+		filePath := c.Args().Get(0)
+		return ImportBookmarks(redisClient, filePath)
+	}
+}
+
+func ImportBookmarks(redisClient *redis.Client, filePath string) error {
+	data, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+
+	bookmarks := gjson.GetBytes(data, "bookmarks").Array()
+	bar := progressbar.Default(int64(len(bookmarks)), "Importing")
+
+	ctx := context.Background()
+
+	for _, item := range bookmarks {
+		bm := models.Bookmark{
+			URL:         item.Get("url").String(),
+			Title:       item.Get("title").String(),
+			Description: item.Get("description").String(),
+			CreatedAt:   item.Get("created_at").Int(),
+			UpdatedAt:   time.Now().Unix(),
+		}
+
+		// Generate unique ID
+		bm.ID = generateID(bm.URL)
+
+		// Parse tags
+		tags := item.Get("tags").Array()
+		for _, tag := range tags {
+			bm.Tags = append(bm.Tags, tag.String())
+		}
+
+		// Deduplicate using Redis set
+		exists, err := redisClient.SAdd(ctx, RedisURLSetKey, bm.URL).Result()
+		if err != nil {
+			return err
+		}
+		if exists == 0 {
+			bar.Add(1)
+			continue // Skip duplicates
+		}
+
+		// Add to search index
+		jsonData, _ := json.Marshal(bm)
+		if err := redisClient.ZAdd(ctx, RedisBookmarksKey, &redis.Z{
+			Score:  float64(bm.CreatedAt),
+			Member: jsonData,
+		}).Err(); err != nil {
+			return err
+		}
+
+		// Index title terms
+		terms := strings.Fields(strings.ToLower(bm.Title))
+		for _, term := range terms {
+			redisClient.SAdd(ctx, RedisTitleSetKey, term)
+		}
+
+		bar.Add(1)
+	}
+	return nil
+}
+
+func generateID(url string) string {
+	// Simple ID generation - replace with proper UUID in production
+	h := fnv.New64a()
+	h.Write([]byte(url))
+	return strconv.FormatUint(h.Sum64(), 16)
+}
+```
+
+### internal/searcher/searcher.go
+```go
+package searcher
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"sort"
+	"strings"
+
+	"github.com/go-redis/redis/v8"
+	"github.com/urfave/cli/v2"
+	"github.com/yourusername/bookmark-cli/internal/models"
+)
+
+type SearchOptions struct {
+	Query       string
+	Tags        []string
+	DateFrom    *int64
+	DateTo      *int64
+	Limit       int
+	IncludeLLM  bool
+}
+
+func SearchCommand(redisClient *redis.Client) cli.ActionFunc {
+	return func(c *cli.Context) error {
+		return InteractiveSearch(redisClient)
+	}
+}
+
+func InteractiveSearch(redisClient *redis.Client) error {
+	fmt.Println("Interactive Bookmark Search (Ctrl+C to exit)")
+	fmt.Println("Shortcuts: /search, #tag, @date, !llm")
+
+	scanner := bufio.NewScanner(os.Stdin)
+	for {
+		fmt.Print("\n> ")
+		if !scanner.Scan() {
+			break
+		}
+
+		input := strings.TrimSpace(scanner.Text())
+		if input == "" {
+			continue
+		}
+
+		opts := parseSearchInput(input)
+		results, err := searchBookmarks(redisClient, opts)
+		if err != nil {
+			fmt.Printf("Error: %v\n", err)
+			continue
+		}
+
+		displayResults(results)
+	}
+	return nil
+}
+
+func searchBookmarks(redisClient *redis.Client, opts SearchOptions) ([]models.Bookmark, error) {
+	ctx := context.Background()
+	
+	// Get all bookmarks
+	zRange := redisClient.ZRangeWithScores(ctx, RedisBookmarksKey, 0, -1)
+	results, err := zRange.Result()
+	if err != nil {
+		return nil, err
+	}
+
+	var matches []models.Bookmark
+	for _, z := range results {
+		var bm models.Bookmark
+		if err := json.Unmarshal([]byte(z.Member.(string)), &bm); err != nil {
+			continue
+		}
+
+		// Apply filters
+		if !matchesFilters(bm, opts) {
+			continue
+		}
+
+		matches = append(matches, bm)
+		if len(matches) >= opts.Limit {
+			break
+		}
+	}
+
+	// Sort by relevance (simplified)
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].CreatedAt > matches[j].CreatedAt
+	})
+
+	return matches, nil
+}
+
+func matchesFilters(bm models.Bookmark, opts SearchOptions) bool {
+	// Text search
+	if opts.Query != "" {
+		query := strings.ToLower(opts.Query)
+		title := strings.ToLower(bm.Title)
+		desc := strings.ToLower(bm.Description)
+		if !strings.Contains(title, query) && !strings.Contains(desc, query) {
+			return false
+		}
+	}
+
+	// Tag filtering
+	if len(opts.Tags) > 0 {
+		tagMap := make(map[string]bool)
+		for _, tag := range bm.Tags {
+			tagMap[strings.ToLower(tag)] = true
+		}
+		for _, tag := range opts.Tags {
+			if !tagMap[strings.ToLower(tag)] {
+				return false
+			}
+		}
+	}
+
+	// Date filtering
+	if opts.DateFrom != nil && bm.CreatedAt < *opts.DateFrom {
+		return false
+	}
+	if opts.DateTo != nil && bm.CreatedAt > *opts.DateTo {
+		return false
+	}
+
+	return true
+}
+
+func parseSearchInput(input string) SearchOptions {
+	opts := SearchOptions{
+		Limit: 20,
+	}
+
+	parts := strings.Fields(input)
+	for _, part := range parts {
+		switch {
+		case strings.HasPrefix(part, "/"):
+			opts.Query = strings.TrimPrefix(part, "/")
+		case strings.HasPrefix(part, "#"):
+			opts.Tags = append(opts.Tags, strings.TrimPrefix(part, "#"))
+		case strings.HasPrefix(part, "@"):
+			// Date parsing would go here
+		case strings.HasPrefix(part, "!"):
+			opts.IncludeLLM = true
+		}
+	}
+
+	return opts
+}
+
+func displayResults(results []models.Bookmark) {
+	if len(results) == 0 {
+		fmt.Println("No results found")
+		return
+	}
+
+	for i, bm := range results {
+		fmt.Printf("%d. %s\n", i+1, bm.Title)
+		fmt.Printf("   %s\n", bm.URL)
+		if bm.Description != "" {
+			fmt.Printf("   %s\n", bm.Description)
+		}
+		if len(bm.Tags) > 0 {
+			fmt.Printf("   Tags: %s\n", strings.Join(bm.Tags, ", "))
+		}
+		fmt.Println()
+	}
+}
+```
+
+### scripts/build.sh
+```bash
+#!/bin/bash
+echo "Building bookmark CLI..."
+go build -o bin/bookmark cmd/bookmark/main.go
+echo "Build complete! Run with: ./bin/bookmark"
+```
+
+### scripts/run-dev.sh
+```bash
+#!/bin/bash
+echo "Starting development server..."
+go run cmd/bookmark/main.go "$@"
+```
+
+## Development Workflow
+
+1. Create the project structure as defined above
+2. Run the setup commands in your terminal
+3. Implement each component step by step:
+   - Start with Redis client
+   - Implement bookmark models
+   - Build importer functionality
+   - Create search capabilities
+   - Add LLM integration
+4. Test with sample data
+5. Run using `./scripts/run-dev.sh`
+
+## Testing Sample Data
+
+Create `test-bookmarks.json`:
+```json
+{
+  "bookmarks": [
+    {
+      "url": "https://golang.org",
+      "title": "Go Programming Language",
+      "description": "Official Go website",
+      "tags": ["programming", "golang"],
+      "created_at": 1634567890
+    },
+    {
+      "url": "https://redis.io",
+      "title": "Redis",
+      "description": "In-memory data structure store",
+      "tags": ["database", "cache"],
+      "created_at": 1634567891
+    }
+  ]
+}
+```
+
+## Running the Application
+
+```bash
+# Import bookmarks
+./scripts/run-dev.sh import test-bookmarks.json
+
+# Search bookmarks
+./scripts/run-dev.sh search
+
+# Clean duplicates
+./scripts/run-dev.sh clean
+```
+
+This MDC file provides a complete project setup guide for Cursor AI to understand and help implement your bookmark manager CLI with all the required features.
+```

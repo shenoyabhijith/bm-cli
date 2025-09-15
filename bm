@@ -1,0 +1,12 @@
+#!/bin/bash
+# Bookmark CLI Global Wrapper Script - BM Version
+# This script ensures the bookmark CLI works from any directory
+
+# Use absolute path to project directory
+PROJECT_DIR="/Users/abhijith/Projects/Go-Bookmarks-cli"
+
+# Change to the project directory to ensure .env is loaded
+cd "$PROJECT_DIR"
+
+# Execute the bookmark CLI with all arguments
+exec "$PROJECT_DIR/bin/bookmark" "$@"
