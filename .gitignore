@@ -1,18 +1,8 @@
-# Build artifacts
-bin/
-*.log
-
-# OS
 .DS_Store
-
-# IDE
-.vscode/
-.idea/
-
-# Go
-coverage.out
-
-# Env
-.env
-.env.*
-configs/*.yaml
+bin/
+*.exe
+*.out
+bookmark
+bm
+/dist
+/build
